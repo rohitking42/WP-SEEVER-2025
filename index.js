@@ -1,451 +1,603 @@
-const express = require('express');
-const fs = require('fs');
-const pino = require('pino');
-const path = require('path');
-const crypto = require('crypto');
-const { makeWASocket, useMultiFileAuthState, delay, DisconnectReason } = require("@whiskeysockets/baileys");
-const multer = require('multer');
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const pino = require("pino");
+const multer = require("multer");
+const {
+  default: Gifted_Tech,
+  useMultiFileAuthState,
+  delay,
+  makeCacheableSignalKeyStore,
+  Browsers,
+} = require("maher-zubair-baileys");
 
 const app = express();
-const port = 5000;
+const PORT = 5000;
 
-let MznKing;
-let messages = null;
-let targetNumbers = [];
-let groupUIDs = [];
-let intervalTime = null;
-let haterName = null;
-let lastSentIndex = 0;
+// Create necessary directories
+if (!fs.existsSync("temp")) fs.mkdirSync("temp");
+if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 
-const activeSessions = new Map(); // sessionKey => { running: true, ... }
-
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-app.use(express.urlencoded({ extended: true }));
+const upload = multer({ dest: "uploads/" });
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
-// ======= Stylish HTML Route =======
-app.get('/', (req, res) => {
-  res.send(`
+// Store active sessions
+const activeSessions = new Map();
+
+// Improved UI HTML
+const htmlTemplate = (additionalContent = "") => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>😈𝗠𝗥 𝐊𝐑𝐈𝐗 𝗪𝗣 𝗟𝗢𝗗𝗘𝗥😈</title>
-  <link href="https://fonts.googleapis.com/css?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-  <style>
-    body {
-      min-height: 100vh;
-      margin: 0;
-      padding: 0;
-      font-family: 'Poppins', Arial, sans-serif;
-      background: linear-gradient(135deg, #1f1c2c 0%, #928dab 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-    }
-    .top-title {
-      margin-top: 32px;
-      font-size: 2.2rem;
-      font-weight: bold;
-      letter-spacing: 2px;
-      color: #fff;
-      text-shadow: 0 2px 8px #000, 0 0 5px #ffd200;
-      text-align: center;
-      background: linear-gradient(90deg, #ff00cc, #00ffd0 60%, #ff00cc);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: shine 2.5s linear infinite;
-    }
-    @keyframes shine {
-      0% { filter: brightness(1);}
-      50% { filter: brightness(1.4);}
-      100% { filter: brightness(1);}
-    }
-    .cred-link {
-      margin: 18px 0 18px 0;
-      font-size: 1.1rem;
-      font-weight: 600;
-      background: #fff;
-      color: #222;
-      padding: 10px 22px;
-      border-radius: 16px;
-      box-shadow: 0 2px 12px #0002;
-      text-decoration: none;
-      display: inline-block;
-      transition: background 0.3s, color 0.3s;
-    }
-    .cred-link:hover {
-      background: #ffd200;
-      color: #0f2027;
-    }
-    .glass-box {
-      background: linear-gradient(120deg,rgba(0,255,255,0.18),rgba(255,0,204,0.13));
-      border-radius: 22px;
-      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-      backdrop-filter: blur(12px);
-      border: 2.5px solid #00ffd0aa;
-      padding: 36px 24px 24px 24px;
-      max-width: 420px;
-      width: 98vw;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      animation: pop-in 0.7s cubic-bezier(.68,-0.55,.27,1.55);
-    }
-    @keyframes pop-in {
-      0% { transform: scale(0.8); opacity: 0; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    form {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      width: 100%;
-    }
-    label {
-      color: #fff;
-      font-weight: 500;
-      margin-bottom: 3px;
-      letter-spacing: 0.5px;
-      font-size: 1rem;
-    }
-    input, select {
-      padding: 11px;
-      border-radius: 8px;
-      border: 1.7px solid #ff00cc;
-      background: rgba(16,16,16,0.85);
-      color: #fff;
-      font-size: 1rem;
-      outline: none;
-      transition: border 0.2s;
-      width: 100%;
-    }
-    input:focus, select:focus {
-      border: 1.7px solid #00ffd0;
-    }
-    input[type="file"] {
-      background: transparent;
-      color: #fff;
-      border: none;
-      padding-left: 0;
-    }
-    .btn {
-      background: linear-gradient(90deg, #ff512f, #dd2476, #1fa2ff);
-      color: #fff;
-      border: none;
-      border-radius: 11px;
-      font-size: 1.11rem;
-      font-weight: bold;
-      padding: 13px 0;
-      margin-top: 10px;
-      box-shadow: 0 2px 8px #ff00cca0;
-      cursor: pointer;
-      transition: background 0.3s, box-shadow 0.3s, color 0.3s, transform 0.2s;
-      letter-spacing: 1px;
-      width: 100%;
-    }
-    .btn:hover {
-      background: linear-gradient(90deg, #1fa2ff, #ff512f, #dd2476);
-      color: #121212;
-      box-shadow: 0 4px 16px #00ffd0a0;
-      transform: scale(1.06);
-    }
-    @media (max-width: 600px) {
-      .glass-box {
-        padding: 14px 2vw 10px 2vw;
-        max-width: 99vw;
-      }
-      .top-title {
-        font-size: 1.3rem;
-      }
-    }
-    .footer {
-      margin-top: 38px;
-      color: #fff;
-      font-size: 1.1rem;
-      font-weight: 600;
-      text-align: center;
-      letter-spacing: 1px;
-      text-shadow: 0 0 8px #00ffd0;
-    }
-    .wp-logo {
-      margin: 24px 0 10px 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .wp-logo-icon {
-      width: 34px;
-      height: 34px;
-      background: #25D366;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-right: 12px;
-      box-shadow: 0 2px 8px #0004;
-    }
-    .wp-logo-icon svg {
-      width: 22px;
-      height: 22px;
-      fill: #fff;
-    }
-    .wp-number {
-      font-size: 1.2rem;
-      font-weight: bold;
-      letter-spacing: 1px;
-      color: #fff;
-      text-shadow: 0 1px 4px #2228;
-    }
-  </style>
-  <script>
-    function toggleFields() {
-      const targetOption = document.getElementById("targetOption").value;
-      if (targetOption === "1") {
-        document.getElementById("numbersField").style.display = "block";
-        document.getElementById("groupUIDsField").style.display = "none";
-      } else if (targetOption === "2") {
-        document.getElementById("groupUIDsField").style.display = "block";
-        document.getElementById("numbersField").style.display = "none";
-      }
-    }
-    window.onload = function() { toggleFields(); }
-
-    // AJAX for sending messages and showing session key
-    function handleSendForm(e) {
-      e.preventDefault();
-      const form = document.getElementById('sendForm');
-      const formData = new FormData(form);
-
-      fetch('/send-messages', {
-        method: 'POST',
-        body: formData
-      })
-      .then(res => res.json())
-      .then(data => {
-        if(data.status === 'success') {
-          document.getElementById('sessionKeyBox').style.display = 'block';
-          document.getElementById('sessionKeyValue').innerText = data.sessionKey;
-          document.getElementById('sendMsgResult').innerText = "Message sending started! Use session key below to stop.";
-        } else {
-          document.getElementById('sendMsgResult').innerText = data.message || "Error!";
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Multi-User Sender</title>
+    <style>
+        :root {
+            --primary: #25D366;
+            --secondary: #128C7E;
+            --accent: #34B7F1;
+            --light: #f5f5f5;
+            --dark: #075E54;
+            --danger: #dc3545;
         }
-      })
-      .catch(() => {
-        document.getElementById('sendMsgResult').innerText = "Server error!";
-      });
-    }
-
-    // AJAX for stopping messages
-    function handleStopForm(e) {
-      e.preventDefault();
-      const form = document.getElementById('stopForm');
-      const formData = new FormData(form);
-      fetch('/stop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionKey: formData.get('sessionKey') })
-      })
-      .then(res => res.json())
-      .then(data => {
-        document.getElementById('stopMsgResult').innerText = data.message || "Stopped!";
-      })
-      .catch(() => {
-        document.getElementById('stopMsgResult').innerText = "Server error!";
-      });
-    }
-  </script>
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f0f2f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: linear-gradient(135deg, var(--secondary), var(--dark));
+            color: white;
+            padding: 20px 0;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2, h3 {
+            margin-bottom: 15px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        input, select, button, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(52, 183, 241, 0.2);
+        }
+        
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        button:hover {
+            background-color: var(--secondary);
+        }
+        
+        .btn-danger {
+            background-color: var(--danger);
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .session-list {
+            margin-top: 30px;
+        }
+        
+        .session-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .session-info {
+            flex: 1;
+        }
+        
+        .session-actions {
+            margin-left: 15px;
+        }
+        
+        .status-connected {
+            color: var(--primary);
+            font-weight: bold;
+        }
+        
+        .status-disconnected {
+            color: var(--danger);
+            font-weight: bold;
+        }
+        
+        .message-log {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #f9f9f9;
+            margin-top: 10px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .log-time {
+            color: #666;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        
+        .log-message {
+            color: #333;
+        }
+        
+        .flex-container {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .flex-item {
+            flex: 1;
+        }
+        
+        @media (max-width: 768px) {
+            .flex-container {
+                flex-direction: column;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="top-title">
-    😈𝗠𝗥 𝐊𝐑𝐈𝐗 𝗪𝗣 𝗟𝗢𝗗𝗘𝗥😈
-  </div>
-  <a class="cred-link" href="https://knight-bot-paircode.onrender.com/" target="_blank">
-    CRED JSON DENE VALA LINK
-  </a>
-  <div class="glass-box">
-    <form id="sendForm" onsubmit="handleSendForm(event)" enctype="multipart/form-data">
-      <label for="creds">Upload creds.json:</label>
-      <input type="file" id="creds" name="creds" accept=".json" required>
-      <label for="targetOption">Select Target Option:</label>
-      <select name="targetOption" id="targetOption" onchange="toggleFields()" required>
-        <option value="1">Send to Target Number</option>
-        <option value="2">Send to WhatsApp Group</option>
-      </select>
-      <div id="numbersField">
-        <label for="numbers">Target Numbers (comma separated):</label>
-        <input type="text" id="numbers" name="numbers" placeholder="e.g. 919999999999,918888888888">
-      </div>
-      <div id="groupUIDsField" style="display:none;">
-        <label for="groupUIDsInput">Group UIDs (comma separated):</label>
-        <input type="text" id="groupUIDsInput" name="groupUIDsInput" placeholder="e.g. 1203630xxxxx-123456@g.us">
-      </div>
-      <label for="messageFile">Upload Message File (.txt):</label>
-      <input type="file" id="messageFile" name="messageFile" accept=".txt" required>
-      <label for="haterNameInput">Enter Hater's Name:</label>
-      <input type="text" id="haterNameInput" name="haterNameInput" placeholder="e.g. Mr. Devil" required>
-      <label for="delayTime">Delay Between Messages (seconds):</label>
-      <input type="number" id="delayTime" name="delayTime" min="1" value="2" required>
-      <button class="btn" type="submit">🚀 Start Sending</button>
-      <div id="sendMsgResult" style="color:#00ffd0;margin-top:10px;text-align:center;"></div>
-    </form>
-    <div class="session-key-box" id="sessionKeyBox" style="margin-top:18px;background:linear-gradient(90deg,#00ffd0cc,#ff00cccc 80%);color:#121212;border-radius:10px;padding:12px 10px;font-size:1.1rem;text-align:center;word-break:break-all;box-shadow:0 0 8px #ff00cca0;display:none;">
-      <b>Session Key:</b>
-      <div id="sessionKeyValue" style="font-size:1.2rem;margin:8px 0;"></div>
-      <span style="font-size:0.95rem;">Copy this key to stop messages below.</span>
+    <div class="container">
+        <header>
+            <h1>WhatsApp Multi-User Message Sender</h1>
+            <p>Send messages to multiple recipients with individual sessions</p>
+        </header>
+        
+        ${additionalContent}
     </div>
-    <form id="stopForm" class="stop-form" onsubmit="handleStopForm(event)">
-      <label for="sessionKey">Enter Session Key to Stop:</label>
-      <input type="text" id="sessionKey" name="sessionKey" placeholder="Paste session key here" required>
-      <button class="btn" type="submit" style="background:linear-gradient(90deg,#00ffd0,#ff00cc 80%);color:#fff;">🛑 Stop Sending</button>
-      <div id="stopMsgResult" style="color:#ff00cc;text-align:center;"></div>
-    </form>
-  </div>
-  <div class="footer">
-    😋 𝗠𝗔𝗗𝗘 𝗕𝗬 𝗠𝗥 𝐑𝐎𝐇𝐈𝐓 =𝟮𝟬𝟮𝟱
-  </div>
-  <div class="wp-logo">
-    <span class="wp-logo-icon">
-      <svg viewBox="0 0 32 32">
-        <path d="M16 2.5C8.3 2.5 2 8.8 2 16.5c0 2.9 0.8 5.7 2.3 8.1L2 30l5.6-2.2c2.3 1.3 4.9 2 7.4 2 7.7 0 14-6.3 14-14S23.7 2.5 16 2.5zm0 25.5c-2.3 0-4.6-0.6-6.6-1.8l-0.5-0.3-3.3 1.3 0.7-3.4-0.3-0.5C4.9 20.1 4.2 18.3 4.2 16.5c0-6.5 5.3-11.8 11.8-11.8s11.8 5.3 11.8 11.8-5.3 11.8-11.8 11.8zm6.2-8.7c-0.3-0.2-1.6-0.8-1.8-0.9-0.2-0.1-0.4-0.2-0.6 0.2-0.2 0.3-0.7 0.9-0.9 1.1-0.2 0.2-0.3 0.2-0.6 0.1-0.3-0.2-1.2-0.4-2.2-1.1-0.8-0.7-1.3-1.5-1.5-1.7-0.2-0.3 0-0.4 0.1-0.6 0.1-0.1 0.2-0.3 0.3-0.4 0.1-0.1 0.1-0.2 0.2-0.3 0.1-0.1 0-0.2 0-0.3-0.1-0.2-0.6-1.5-0.8-2.1-0.2-0.5-0.4-0.5-0.6-0.5-0.2 0-0.4 0-0.6 0-0.2 0-0.5 0.1-0.7 0.3-0.2 0.2-0.7 0.7-0.7 1.7s0.7 2 0.8 2.1c0.1 0.1 1.4 2.2 3.5 3 0.5 0.2 0.9 0.3 1.2 0.4 0.5 0.1 0.9 0.1 1.2 0.1 0.4 0 1.2-0.2 1.4-0.6 0.2-0.3 0.2-0.7 0.1-0.8z"/>
-      </svg>
-    </span>
-    <span class="wp-number">918708206094</span>
-  </div>
 </body>
 </html>
-  `);
+`;
+
+// Home route
+app.get("/", (req, res) => {
+    const content = `
+        <div class="flex-container">
+            <div class="flex-item">
+                <div class="card">
+                    <h2>Create New Session</h2>
+                    <form action="/code" method="GET">
+                        <div class="form-group">
+                            <label for="number">WhatsApp Number</label>
+                            <input type="text" id="number" name="number" placeholder="e.g. 919876543210" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="sessionName">Session Name (Optional)</label>
+                            <input type="text" id="sessionName" name="sessionName" placeholder="My Business Account">
+                        </div>
+                        <button type="submit">Generate Pairing Code</button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="flex-item">
+                <div class="card">
+                    <h2>Send Messages</h2>
+                    <form action="/send-message" method="POST" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label for="taskId">Session/Task ID</label>
+                            <input type="text" id="taskId" name="taskId" placeholder="Enter your session ID" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="targetType">Target Type</label>
+                            <select id="targetType" name="targetType" required>
+                                <option value="">-- Select Target Type --</option>
+                                <option value="number">Phone Number</option>
+                                <option value="group">Group ID</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="target">Target</label>
+                            <input type="text" id="target" name="target" placeholder="Phone number or Group ID" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="messageFile">Message File (TXT)</label>
+                            <input type="file" id="messageFile" name="messageFile" accept=".txt" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="delaySec">Delay Between Messages (seconds)</label>
+                            <input type="number" id="delaySec" name="delaySec" min="1" value="5" required>
+                        </div>
+                        <button type="submit">Start Sending</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card session-list">
+            <h2>Active Sessions</h2>
+            ${Array.from(activeSessions.entries()).map(([id, session]) => `
+                <div class="session-item">
+                    <div class="session-info">
+                        <h3>${session.name || 'Unnamed Session'} (ID: ${id})</h3>
+                        <p>Number: ${session.number}</p>
+                        <p>Status: <span class="status-connected">Connected</span></p>
+                        <div class="message-log">
+                            ${session.logs.slice(-5).map(log => `
+                                <div class="log-entry">
+                                    <span class="log-time">${new Date(log.time).toLocaleTimeString()}</span>
+                                    <span class="log-message">${log.message}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="session-actions">
+                        <form action="/stop-session" method="POST" style="margin-bottom: 10px;">
+                            <input type="hidden" name="taskId" value="${id}">
+                            <button type="submit" class="btn-danger">Stop Session</button>
+                        </form>
+                    </div>
+                </div>
+            `).join('') || '<p>No active sessions</p>'}
+        </div>
+    `;
+    
+    res.send(htmlTemplate(content));
 });
 
-// ======= Main Message Sending Endpoint (with creds.json, session key) =======
-app.post('/send-messages', upload.fields([
-  { name: 'creds', maxCount: 1 },
-  { name: 'messageFile', maxCount: 1 }
-]), async (req, res) => {
-  try {
-    const { targetOption, numbers, groupUIDsInput, delayTime, haterNameInput } = req.body;
-
-    // creds.json required
-    if (!req.files['creds']) {
-      return res.json({ status: 'error', message: 'creds.json file is required!' });
-    }
-    const credsBuffer = req.files['creds'][0].buffer;
-
-    haterName = haterNameInput;
-    intervalTime = parseInt(delayTime, 10);
-
-    if (req.files['messageFile']) {
-      messages = req.files['messageFile'][0].buffer.toString('utf-8').split('\n').filter(Boolean);
-    } else {
-      return res.json({ status: 'error', message: 'No message file uploaded' });
+// Generate pairing code
+app.get("/code", async (req, res) => {
+    const { number, sessionName } = req.query;
+    if (!number) {
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Phone number is required</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
     }
 
-    if (targetOption === "1") {
-      targetNumbers = numbers.split(',').map(x => x.replace(/[^0-9]/g, '').trim()).filter(x => x.length > 8);
-      groupUIDs = [];
-    } else if (targetOption === "2") {
-      groupUIDs = groupUIDsInput.split(',').map(x => x.trim()).filter(x => x);
-      targetNumbers = [];
+    const taskId = Math.random().toString(36).substring(2, 10);
+    const tempPath = path.join("temp", taskId);
+
+    if (!fs.existsSync(tempPath)) {
+        fs.mkdirSync(tempPath, { recursive: true });
     }
 
-    // --- Session Key Logic ---
-    const sessionKey = crypto.randomBytes(8).toString('hex');
-    const sessionDir = path.join(__dirname, 'sessions', sessionKey);
-    fs.mkdirSync(sessionDir, { recursive: true });
-    fs.writeFileSync(path.join(sessionDir, 'creds.json'), credsBuffer);
-
-    activeSessions.set(sessionKey, { running: true });
-
-    sendMessages(sessionKey, sessionDir, messages, targetNumbers, groupUIDs, intervalTime, haterName);
-
-    res.json({
-      status: 'success',
-      message: 'Message sending started!',
-      sessionKey
-    });
-
-  } catch (error) {
-    res.json({ status: 'error', message: error.message });
-  }
-});
-
-// ======= Stop Session =======
-app.post('/stop', express.json(), (req, res) => {
-  const { sessionKey } = req.body;
-  if (activeSessions.has(sessionKey)) {
-    activeSessions.get(sessionKey).running = false;
-    const sessionDir = path.join(__dirname, 'sessions', sessionKey);
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-    activeSessions.delete(sessionKey);
-    res.json({ status: 'success', message: 'Session stopped' });
-  } else {
-    res.status(404).json({ status: 'error', message: 'Invalid session key' });
-  }
-});
-
-// ======= Message Sending Logic (with sessionKey) =======
-const sendMessages = async (sessionKey, sessionDir, messages, targetNumbers, groupUIDs, intervalTime, haterName) => {
-  async function connectSocket() {
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-    const sock = makeWASocket({
-      logger: pino({ level: 'silent' }),
-      auth: state,
-    });
-    sock.ev.on('creds.update', saveCreds);
-    return sock;
-  }
-
-  let sock = await connectSocket();
-  let connected = true;
-
-  sock.ev.on('connection.update', async (s) => {
-    const { connection, lastDisconnect } = s;
-    if (connection === "open") {
-      console.log("WhatsApp connected successfully.");
-    }
-    if (connection === "close" && lastDisconnect?.error) {
-      const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      if (shouldReconnect) {
-        console.log("Reconnecting...");
-        sock = await connectSocket();
-      } else {
-        console.log("Connection closed. Restart the script.");
-      }
-    }
-  });
-
-  let i = 0;
-  while (activeSessions.get(sessionKey)?.running && i < messages.length) {
+    const cleanNumber = number.replace(/[^0-9]/g, "");
+    
     try {
-      const fullMessage = `${haterName} ${messages[i]}`;
-      if (targetNumbers.length > 0) {
-        for (const targetNumber of targetNumbers) {
-          await sock.sendMessage(targetNumber + '@s.whatsapp.net', { text: fullMessage });
-          console.log(`Message sent to target number: ${targetNumber}`);
-        }
-      }
-      if (groupUIDs.length > 0) {
-        for (const groupUID of groupUIDs) {
-          await sock.sendMessage(groupUID + '@g.us', { text: fullMessage });
-          console.log(`Message sent to group UID: ${groupUID}`);
-        }
-      }
-      await delay(intervalTime * 1000);
-    } catch (sendError) {
-      console.log(`Error sending message: ${sendError.message}. Retrying...`);
-      await delay(5000);
-    }
-    i++;
-  }
-  try { await sock?.logout(); } catch (e) {}
-  activeSessions.delete(sessionKey);
-};
+        const { state, saveCreds } = await useMultiFileAuthState(tempPath);
+        
+        const logger = pino({ level: "fatal" }).child({ level: "fatal" });
+        
+        const client = Gifted_Tech({
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
+            printQRInTerminal: false,
+            logger: logger,
+            browser: Browsers.ubuntu("Chrome"),
+        });
 
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+        if (!client.authState.creds.registered) {
+            await delay(1500);
+            const code = await client.requestPairingCode(cleanNumber);
+            
+            // Create new session
+            activeSessions.set(taskId, {
+                client,
+                number: cleanNumber,
+                name: sessionName || `Session ${taskId}`,
+                path: tempPath,
+                logs: [],
+                saveCreds,
+                state,
+                running: true
+            });
+            
+            // Add log function to session
+            activeSessions.get(taskId).log = (message) => {
+                const entry = {
+                    time: Date.now(),
+                    message: message
+                };
+                activeSessions.get(taskId).logs.push(entry);
+                console.log(`[${taskId}] ${message}`);
+            };
+
+            client.ev.on("creds.update", saveCreds);
+            
+            client.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect } = update;
+                
+                if (connection === "open") {
+                    activeSessions.get(taskId).log("WhatsApp connected successfully");
+                    await delay(2000);
+                } 
+                else if (connection === "close") {
+                    if (lastDisconnect?.error?.output?.statusCode !== 401) {
+                        activeSessions.get(taskId).log("Connection lost, reconnecting...");
+                        await delay(10000);
+                        initializeClient(taskId);
+                    } else {
+                        activeSessions.get(taskId).log("Session terminated - authentication error");
+                        activeSessions.delete(taskId);
+                    }
+                }
+            });
+
+            return res.send(htmlTemplate(`
+                <div class="card">
+                    <h2>Pairing Code Generated</h2>
+                    <div style="font-size: 24px; margin: 20px 0; padding: 15px; background: #f0f8ff; border-radius: 5px;">
+                        Your Pairing Code: <strong>${code}</strong>
+                    </div>
+                    <p>Task ID: <code>${taskId}</code> (Save this to control your session)</p>
+                    <p>Number: ${cleanNumber}</p>
+                    <p>Session will automatically connect once paired.</p>
+                    <a href="/" class="btn">Return to Dashboard</a>
+                </div>
+            `));
+        }
+    } catch (error) {
+        console.error("Error generating pairing code:", error);
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Failed to generate pairing code: ${error.message}</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
+    }
 });
+
+// Initialize client (for reconnections)
+async function initializeClient(taskId) {
+    if (!activeSessions.has(taskId)) return;
+
+    const session = activeSessions.get(taskId);
+    
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState(session.path);
+        
+        const logger = pino({ level: "fatal" }).child({ level: "fatal" });
+        
+        session.client = Gifted_Tech({
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
+            printQRInTerminal: false,
+            logger: logger,
+            browser: Browsers.ubuntu("Chrome"),
+        });
+
+        session.client.ev.on("creds.update", saveCreds);
+        
+        session.client.ev.on("connection.update", async (update) => {
+            const { connection, lastDisconnect } = update;
+            
+            if (connection === "open") {
+                session.log("Reconnected successfully");
+            } 
+            else if (connection === "close") {
+                if (lastDisconnect?.error?.output?.statusCode !== 401) {
+                    session.log("Reconnection failed, trying again...");
+                    await delay(15000);
+                    initializeClient(taskId);
+                } else {
+                    session.log("Session terminated - authentication error");
+                    activeSessions.delete(taskId);
+                }
+            }
+        });
+    } catch (error) {
+        session.log(`Reconnection error: ${error.message}`);
+        await delay(30000);
+        initializeClient(taskId);
+    }
+}
+
+// Send messages
+app.post("/send-message", upload.single("messageFile"), async (req, res) => {
+    const { taskId, target, targetType, delaySec } = req.body;
+    const filePath = req.file?.path;
+
+    if (!taskId || !target || !filePath || !delaySec) {
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Missing required fields</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
+    }
+
+    if (!activeSessions.has(taskId)) {
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Invalid session ID or session not active</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
+    }
+
+    const session = activeSessions.get(taskId);
+    
+    try {
+        const messages = fs.readFileSync(filePath, "utf-8")
+            .split("\n")
+            .filter(msg => msg.trim() !== "");
+        
+        if (messages.length === 0) {
+            return res.send(htmlTemplate(`
+                <div class="card">
+                    <h2>Error</h2>
+                    <p>Message file is empty</p>
+                    <a href="/">Go back</a>
+                </div>
+            `));
+        }
+
+        const recipient = targetType === "group" ? target + "@g.us" : target + "@s.whatsapp.net";
+        let index = 0;
+        
+        session.log(`Started sending messages to ${recipient}`);
+        
+        // Start sending in background
+        (async () => {
+            while (session.running) {
+                const msg = messages[index];
+                
+                try {
+                    await session.client.sendMessage(recipient, { text: msg });
+                    session.log(`Sent to ${target}: ${msg.substring(0, 50)}${msg.length > 50 ? '...' : ''}`);
+                } catch (error) {
+                    session.log(`Error sending message: ${error.message}`);
+                    await delay(5000);
+                    continue;
+                }
+                
+                index = (index + 1) % messages.length;
+                await delay(parseInt(delaySec) * 1000);
+            }
+        })();
+
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Message Sending Started</h2>
+                <p>Messages are now being sent to ${target} (${targetType})</p>
+                <p>Delay: ${delaySec} seconds between messages</p>
+                <p>Total messages: ${messages.length}</p>
+                <p>Task ID: <code>${taskId}</code></p>
+                <div class="message-log">
+                    ${session.logs.slice(-5).map(log => `
+                        <div class="log-entry">
+                            <span class="log-time">${new Date(log.time).toLocaleTimeString()}</span>
+                            <span class="log-message">${log.message}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <a href="/">Return to Dashboard</a>
+            </div>
+        `));
+    } catch (error) {
+        session.log(`Error in message sending: ${error.message}`);
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Failed to start message sending: ${error.message}</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
+    } finally {
+        if (filePath && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    }
+});
+
+// Stop session
+app.post("/stop-session", async (req, res) => {
+    const { taskId } = req.body;
+    
+    if (!taskId || !activeSessions.has(taskId)) {
+        return res.send(htmlTemplate(`
+            <div class="card">
+                <h2>Error</h2>
+                <p>Invalid session ID</p>
+                <a href="/">Go back</a>
+            </div>
+        `));
+    }
+    
+    const session = activeSessions.get(taskId);
+    session.running = false;
+    
+    try {
+        await session.client?.ws?.close();
+        session.log("Session stopped by user");
+    } catch (error) {
+        console.error("Error stopping session:", error);
+    }
+    
+    activeSessions.delete(taskId);
+    
+    return res.send(htmlTemplate(`
+        <div class="card">
+            <h2>Session Stopped</h2>
+            <p>Session ${taskId} has been stopped</p>
+            <a href="/">Return to Dashboard</a>
+        </div>
+    `));
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
